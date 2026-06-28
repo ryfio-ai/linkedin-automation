@@ -1,0 +1,211 @@
+{
+  "name": "LinkedIn Multi-AI Automation with Supabase (Direct LinkedIn)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            { "field": "cronExpression", "expression": "0 20 8 * * *" },
+            { "field": "cronExpression", "expression": "0 50 18 * * *" }
+          ]
+        }
+      },
+      "id": "trigger_schedule",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [ 100, 300 ]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "table": "calendar",
+        "limit": 10,
+        "additionalFields": {
+          "match": {
+            "status": "Not Posted"
+          }
+        }
+      },
+      "id": "supabase_read",
+      "name": "Supabase (Read Pending)",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [ 300, 300 ],
+      "credentials": { "supabaseApi": { "id": "", "name": "Supabase account" } }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            { "value1": "={{ $json.post_date }}", "value2": "={{ $now.format('YYYY-MM-DD') }}" },
+            { "value1": "={{ $json.post_time.split(':')[0] }}", "value2": "={{ $now.format('HH') }}" }
+          ]
+        }
+      },
+      "id": "if_today",
+      "name": "IF (Today & Matching Hour)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [ 500, 300 ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "table": "calendar",
+        "columns": "status",
+        "matchColumns": "id"
+      },
+      "id": "status_posting",
+      "name": "Supabase (Set Posting)",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [ 700, 300 ],
+      "credentials": { "supabaseApi": { "id": "", "name": "Supabase account" } }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.OPENROUTER_API_KEY }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"google/gemini-2.5-flash\",\n  \"messages\": [\n    {\"role\": \"user\", \"content\": \"Write a professional LinkedIn post based on this draft: {{ $('Supabase (Set Posting)').item.json.draft_post }}\"}\n  ]\n}"
+      },
+      "id": "gemini_generate",
+      "name": "Gemini 2.5 (Variant A)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [ 900, 100 ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.OPENROUTER_API_KEY }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"meta-llama/llama-3-8b-instruct\",\n  \"messages\": [\n    {\"role\": \"user\", \"content\": \"Write a professional LinkedIn post based on this draft: {{ $('Supabase (Set Posting)').item.json.draft_post }}\"}\n  ]\n}"
+      },
+      "id": "openrouter_generate",
+      "name": "OpenRouter Llama 3 (Variant B)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [ 900, 300 ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.OLLAMA_BASE_URL }}/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"mistral\",\n  \"prompt\": \"Write a professional LinkedIn post based on this draft: {{ $('Supabase (Set Posting)').item.json.draft_post }}\",\n  \"stream\": false\n}"
+      },
+      "id": "ollama_generate",
+      "name": "Ollama Mistral (Variant C)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [ 900, 500 ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "mode": "wait",
+        "amount": 3
+      },
+      "id": "merge_variants",
+      "name": "Merge AI Variants",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2,
+      "position": [ 1100, 300 ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.OPENROUTER_API_KEY }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"google/gemini-2.5-flash\",\n  \"messages\": [\n    {\"role\": \"user\", \"content\": \"You are an expert LinkedIn judge. Review these three variants and return ONLY the text of the best one.\\n\\nVariant A (Gemini): {{ $('Gemini 2.5 (Variant A)').item.json.choices[0].message.content || 'FAILED' }}\\n\\nVariant B (OpenRouter): {{ $('OpenRouter Llama 3 (Variant B)').item.json.choices[0].message.content || 'FAILED' }}\\n\\nVariant C (Ollama): {{ $('Ollama Mistral (Variant C)').item.json.response || 'FAILED' }}\"}\n  ]\n}"
+      },
+      "id": "gemini_judge",
+      "name": "Gemini (The Judge)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [ 1300, 300 ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "text": "={{ $json.choices[0].message.content }}"
+      },
+      "id": "linkedin_post",
+      "name": "LinkedIn (Post)",
+      "type": "n8n-nodes-base.linkedIn",
+      "typeVersion": 1,
+      "position": [ 1500, 300 ],
+      "credentials": { "linkedInOAuth2Api": { "id": "", "name": "LinkedIn account" } },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "table": "calendar",
+        "columns": "status, posted_at, linkedin_url, winning_ai_version",
+        "matchColumns": "id"
+      },
+      "id": "supabase_update_final",
+      "name": "Supabase (Update Success)",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [ 1700, 300 ],
+      "credentials": { "supabaseApi": { "id": "", "name": "Supabase account" } }
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "table": "logs"
+      },
+      "id": "supabase_insert_log",
+      "name": "Supabase (Log Success)",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [ 1900, 300 ],
+      "credentials": { "supabaseApi": { "id": "", "name": "Supabase account" } }
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": { "main": [ [ { "node": "Supabase (Read Pending)", "type": "main", "index": 0 } ] ] },
+    "Supabase (Read Pending)": { "main": [ [ { "node": "IF (Today & Matching Hour)", "type": "main", "index": 0 } ] ] },
+    "IF (Today & Matching Hour)": { "main": [ [ { "node": "Supabase (Set Posting)", "type": "main", "index": 0 } ] ] },
+    "Supabase (Set Posting)": { "main": [ 
+      [ { "node": "Gemini 2.5 (Variant A)", "type": "main", "index": 0 } ],
+      [ { "node": "OpenRouter Llama 3 (Variant B)", "type": "main", "index": 0 } ],
+      [ { "node": "Ollama Mistral (Variant C)", "type": "main", "index": 0 } ]
+    ] },
+    "Gemini 2.5 (Variant A)": { "main": [ [ { "node": "Merge AI Variants", "type": "main", "index": 0 } ] ] },
+    "OpenRouter Llama 3 (Variant B)": { "main": [ [ { "node": "Merge AI Variants", "type": "main", "index": 0 } ] ] },
+    "Ollama Mistral (Variant C)": { "main": [ [ { "node": "Merge AI Variants", "type": "main", "index": 0 } ] ] },
+    "Merge AI Variants": { "main": [ [ { "node": "Gemini (The Judge)", "type": "main", "index": 0 } ] ] },
+    "Gemini (The Judge)": { "main": [ [ { "node": "LinkedIn (Post)", "type": "main", "index": 0 } ] ] },
+    "LinkedIn (Post)": { "main": [ [ { "node": "Supabase (Update Success)", "type": "main", "index": 0 } ] ] },
+    "Supabase (Update Success)": { "main": [ [ { "node": "Supabase (Log Success)", "type": "main", "index": 0 } ] ] }
+  }
+}
