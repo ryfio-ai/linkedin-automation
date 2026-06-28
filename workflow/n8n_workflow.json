@@ -1,5 +1,5 @@
 {
-  "name": "LinkedIn AI Content Automation Platform",
+  "name": "LinkedIn Multi-AI Automation with Supabase",
   "nodes": [
     {
       "parameters": {
@@ -18,366 +18,179 @@
     },
     {
       "parameters": {
-        "operation": "read",
-        "documentId": { "__rl": true, "value": "={{ $env.GOOGLE_SHEET_ID }}", "mode": "id" },
-        "sheetName": { "__rl": true, "value": "Calendar", "mode": "name" },
-        "options": {}
+        "operation": "getAll",
+        "table": "calendar",
+        "limit": 10,
+        "additionalFields": {
+          "match": {
+            "status": "Not Posted"
+          }
+        }
       },
-      "id": "read_rows",
-      "name": "Google Sheets (Read Rows)",
-      "type": "n8n-nodes-base.googleSheets",
-      "typeVersion": 4,
+      "id": "supabase_read",
+      "name": "Supabase (Read Pending)",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
       "position": [ 300, 300 ],
-      "credentials": { "googleSheetsOAuth2Api": { "id": "", "name": "Google Sheets account" } }
-    },
-    {
-      "parameters": {
-        "action": "format",
-        "value": "={{ $json.Date }}",
-        "toFormat": "YYYY-MM-DD",
-        "options": {}
-      },
-      "id": "date_time",
-      "name": "Date & Time (Parse)",
-      "type": "n8n-nodes-base.dateTime",
-      "typeVersion": 2,
-      "position": [ 500, 300 ]
+      "credentials": { "supabaseApi": { "id": "", "name": "Supabase account" } }
     },
     {
       "parameters": {
         "conditions": {
           "string": [
-            { "value1": "={{ $json.Status }}", "value2": "Not Posted" },
-            { "value1": "={{ $json.formattedDate }}", "value2": "={{ $now.format('YYYY-MM-DD') }}" },
-            { "value1": "={{ $json.Time.split(':')[0] }}", "value2": "={{ $now.format('HH') }}" }
+            { "value1": "={{ $json.post_date }}", "value2": "={{ $now.format('YYYY-MM-DD') }}" },
+            { "value1": "={{ $json.post_time.split(':')[0] }}", "value2": "={{ $now.format('HH') }}" }
           ]
         }
       },
       "id": "if_today",
-      "name": "IF (Not Posted, Today, & Matching Hour)",
+      "name": "IF (Today & Matching Hour)",
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
-      "position": [ 700, 300 ]
+      "position": [ 500, 300 ]
     },
     {
       "parameters": {
         "operation": "update",
-        "documentId": { "__rl": true, "value": "={{ $env.GOOGLE_SHEET_ID }}", "mode": "id" },
-        "sheetName": { "__rl": true, "value": "Calendar", "mode": "name" },
-        "rowNumber": "={{ $json.row_number }}",
-        "columns": {
-          "mappingMode": "defineBelow",
-          "value": { "Status": "Posting" }
-        },
-        "options": {}
+        "table": "calendar",
+        "columns": "status",
+        "matchColumns": "id"
       },
       "id": "status_posting",
-      "name": "Update Status (Posting)",
-      "type": "n8n-nodes-base.googleSheets",
-      "typeVersion": 4,
-      "position": [ 900, 300 ],
-      "credentials": { "googleSheetsOAuth2Api": { "id": "", "name": "Google Sheets account" } }
+      "name": "Supabase (Set Posting)",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [ 700, 300 ],
+      "credentials": { "supabaseApi": { "id": "", "name": "Supabase account" } }
     },
     {
       "parameters": {
-        "jsCode": "return {\n  ...items,\n  _execution_context: {\n    row_number: $json.row_number,\n    post_date: $json.Date,\n    post_time: $json.Time\n  }\n}"
+        "prompt": "=Write a professional LinkedIn post.\nDraft:\n{{ $json.draft_post }}",
+        "model": "={{ $env.GEMINI_MODEL }}"
       },
-      "id": "preserve_row_context",
-      "name": "Code (Preserve Row Context)",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [ 1000, 300 ]
-    },
-    {
-      "parameters": {
-        "prompt": "=You are writing for my personal LinkedIn profile.\n\nAudience:\nSoftware Engineers\nFounders\nRecruiters\nManufacturing Leaders\n\nWriting style:\nProfessional\nSimple English\nOne hook\nShort paragraphs\nMaximum 5 hashtags\nNo markdown\nNo quotation marks\nReturn only the final LinkedIn post.\n\nPost:\n{{ $json.Post }}",
-        "model": "={{ $env.GEMINI_MODEL }}",
-        "options": {}
-      },
-      "id": "gemini",
-      "name": "Gemini (Rewrite)",
+      "id": "gemini_generate",
+      "name": "Gemini 2.5 (Variant A)",
       "type": "n8n-nodes-base.googleGemini",
       "typeVersion": 1,
-      "position": [ 1150, 300 ],
+      "position": [ 900, 100 ],
       "credentials": { "googleGeminiApi": { "id": "", "name": "Google Gemini account" } },
       "onError": "continueErrorOutput"
     },
     {
       "parameters": {
-        "conditions": {
-          "string": [
-            { "value1": "={{ $json.errorMessage }}", "operation": "isEmpty" }
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.OPENROUTER_API_KEY }}" }
           ]
-        }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"meta-llama/llama-3-8b-instruct\",\n  \"messages\": [\n    {\"role\": \"user\", \"content\": \"Write a professional LinkedIn post based on this draft: {{ $('Supabase (Set Posting)').item.json.draft_post }}\"}\n  ]\n}"
       },
-      "id": "check_gemini_error",
-      "name": "IF (Gemini Success)",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 1,
-      "position": [ 1300, 300 ]
-    },
-    {
-      "parameters": {
-        "conditions": {
-          "string": [
-            { "value1": "={{ $json._execution_context.image_url }}", "operation": "isNotEmpty" }
-          ]
-        }
-      },
-      "id": "check_image",
-      "name": "IF Image Exists",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 1,
-      "position": [ 1450, 300 ]
-    },
-    {
-      "parameters": {
-        "method": "HEAD",
-        "url": "={{ $json._execution_context.image_url }}",
-        "options": {}
-      },
-      "id": "validate_image",
-      "name": "Validate Image URL",
+      "id": "openrouter_generate",
+      "name": "OpenRouter Llama 3 (Variant B)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
-      "position": [ 1600, 200 ],
+      "position": [ 900, 300 ],
       "onError": "continueErrorOutput"
     },
     {
       "parameters": {
-        "conditions": {
-          "string": [
-            { "value1": "={{ $json.statusCode }}", "value2": "200", "operation": "equal" }
-          ]
-        }
+        "method": "POST",
+        "url": "={{ $env.OLLAMA_BASE_URL }}/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"mistral\",\n  \"prompt\": \"Write a professional LinkedIn post based on this draft: {{ $('Supabase (Set Posting)').item.json.draft_post }}\",\n  \"stream\": false\n}"
       },
-      "id": "check_image_valid",
-      "name": "IF Image Valid (200)",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 1,
-      "position": [ 1750, 200 ]
+      "id": "ollama_generate",
+      "name": "Ollama Mistral (Variant C)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [ 900, 500 ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
-        "text": "={{ $('Gemini (Rewrite)').item.json.text }}",
+        "mode": "wait",
+        "amount": 3
+      },
+      "id": "merge_variants",
+      "name": "Merge AI Variants",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2,
+      "position": [ 1100, 300 ]
+    },
+    {
+      "parameters": {
+        "prompt": "=You are an expert LinkedIn judge. Review these three variants and return ONLY the text of the best one.\n\nVariant A (Gemini): {{ $('Gemini 2.5 (Variant A)').item.json.text || 'FAILED' }}\n\nVariant B (OpenRouter): {{ $('OpenRouter Llama 3 (Variant B)').item.json.choices[0].message.content || 'FAILED' }}\n\nVariant C (Ollama): {{ $('Ollama Mistral (Variant C)').item.json.response || 'FAILED' }}",
+        "model": "={{ $env.GEMINI_MODEL }}"
+      },
+      "id": "gemini_judge",
+      "name": "Gemini (The Judge)",
+      "type": "n8n-nodes-base.googleGemini",
+      "typeVersion": 1,
+      "position": [ 1300, 300 ],
+      "credentials": { "googleGeminiApi": { "id": "", "name": "Google Gemini account" } }
+    },
+    {
+      "parameters": {
+        "text": "={{ $json.text }}",
         "profile": "={{ $env.BUFFER_PROFILE_ID }}",
         "now": true,
-        "media": [ "={{ $json._execution_context.image_url }}" ]
+        "media": [ "={{ $('Supabase (Set Posting)').item.json.image_url }}" ]
       },
-      "id": "buffer_image",
-      "name": "Buffer (Image)",
+      "id": "buffer_post",
+      "name": "Buffer (Post)",
       "type": "n8n-nodes-base.buffer",
       "typeVersion": 1,
-      "position": [ 1900, 200 ],
-      "retryOnFail": true,
-      "maxTries": 3,
-      "waitBetweenTries": 30000,
-      "credentials": { "bufferApi": { "id": "", "name": "Buffer account" } },
-      "onError": "continueErrorOutput"
-    },
-    {
-      "parameters": {
-        "text": "={{ $('Gemini (Rewrite)').item.json.text }}",
-        "profile": "={{ $env.BUFFER_PROFILE_ID }}",
-        "now": true
-      },
-      "id": "buffer_text",
-      "name": "Buffer (Text Only)",
-      "type": "n8n-nodes-base.buffer",
-      "typeVersion": 1,
-      "position": [ 1900, 400 ],
-      "retryOnFail": true,
-      "maxTries": 3,
-      "waitBetweenTries": 30000,
-      "credentials": { "bufferApi": { "id": "", "name": "Buffer account" } },
-      "onError": "continueErrorOutput"
-    },
-    {
-      "parameters": {
-        "conditions": {
-          "string": [
-            { "value1": "={{ $json.errorMessage }}", "operation": "isEmpty" }
-          ]
-        }
-      },
-      "id": "check_buffer_success",
-      "name": "IF Buffer Success",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 1,
-      "position": [ 2050, 300 ]
+      "position": [ 1500, 300 ],
+      "credentials": { "bufferApi": { "id": "", "name": "Buffer account" } }
     },
     {
       "parameters": {
         "operation": "update",
-        "documentId": { "__rl": true, "value": "={{ $env.GOOGLE_SHEET_ID }}", "mode": "id" },
-        "sheetName": { "__rl": true, "value": "Calendar", "mode": "name" },
-        "rowNumber": "={{ $json._execution_context.row_number }}",
-        "columns": {
-          "mappingMode": "defineBelow",
-          "value": {
-            "Status": "Posted",
-            "Posted At": "={{ $now }}",
-            "Buffer ID": "={{ $json.id }}",
-            "LinkedIn URL": "={{ $json.share_url }}",
-            "AI Version": "={{ $env.GEMINI_MODEL }}"
-          }
-        },
-        "options": {}
+        "table": "calendar",
+        "columns": "status, posted_at, buffer_id, linkedin_url, winning_ai_version, gemini_variant, openrouter_variant, ollama_variant",
+        "matchColumns": "id"
       },
-      "id": "update_sheet_final",
-      "name": "Google Sheets Update (Final)",
-      "type": "n8n-nodes-base.googleSheets",
-      "typeVersion": 4,
-      "position": [ 2200, 300 ],
-      "credentials": { "googleSheetsOAuth2Api": { "id": "", "name": "Google Sheets account" } }
-    },
-    {
-      "parameters": {
-        "operation": "append",
-        "documentId": { "__rl": true, "value": "={{ $env.GOOGLE_SHEET_ID }}", "mode": "id" },
-        "sheetName": { "__rl": true, "value": "Logs", "mode": "name" },
-        "columns": {
-          "mappingMode": "defineBelow",
-          "value": {
-            "Date": "={{ $now }}",
-            "Workflow": "LinkedIn AI Automation",
-            "Status": "Success",
-            "LinkedIn URL": "={{ $json.share_url }}"
-          }
-        },
-        "options": {}
-      },
-      "id": "append_logs",
-      "name": "Google Sheets (Append Log)",
-      "type": "n8n-nodes-base.googleSheets",
-      "typeVersion": 4,
-      "position": [ 2350, 300 ],
-      "credentials": { "googleSheetsOAuth2Api": { "id": "", "name": "Google Sheets account" } }
-    },
-    {
-      "parameters": {},
-      "id": "error_trigger",
-      "name": "Error Trigger",
-      "type": "n8n-nodes-base.errorTrigger",
+      "id": "supabase_update_final",
+      "name": "Supabase (Update Success)",
+      "type": "n8n-nodes-base.supabase",
       "typeVersion": 1,
-      "position": [ 100, 700 ]
+      "position": [ 1700, 300 ],
+      "credentials": { "supabaseApi": { "id": "", "name": "Supabase account" } }
     },
     {
       "parameters": {
-        "jsCode": "const errorMsg = items[0].json.error?.message || 'Unknown error';\nconst rowNum = items[0].json._execution_context?.row_number || items[0].json.row_number || 2;\nreturn [{\n  row_number: rowNum,\n  error_message: errorMsg\n}]"
+        "operation": "insert",
+        "table": "logs"
       },
-      "id": "extract_error_context",
-      "name": "Code (Extract Error Context)",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [ 300, 700 ]
-    },
-    {
-      "parameters": {
-        "operation": "update",
-        "documentId": { "__rl": true, "value": "={{ $env.GOOGLE_SHEET_ID }}", "mode": "id" },
-        "sheetName": { "__rl": true, "value": "Calendar", "mode": "name" },
-        "rowNumber": "={{ $json.row_number }}",
-        "columns": {
-          "mappingMode": "defineBelow",
-          "value": {
-            "Status": "Failed",
-            "Error": "={{ $json.error_message }}"
-          }
-        },
-        "options": {}
-      },
-      "id": "update_error_calendar",
-      "name": "Google Sheets (Log Error to Calendar)",
-      "type": "n8n-nodes-base.googleSheets",
-      "typeVersion": 4,
-      "position": [ 450, 700 ],
-      "credentials": { "googleSheetsOAuth2Api": { "id": "", "name": "Google Sheets account" } }
-    },
-    {
-      "parameters": {
-        "operation": "append",
-        "documentId": { "__rl": true, "value": "={{ $env.GOOGLE_SHEET_ID }}", "mode": "id" },
-        "sheetName": { "__rl": true, "value": "Logs", "mode": "name" },
-        "columns": {
-          "mappingMode": "defineBelow",
-          "value": {
-            "Date": "={{ $now }}",
-            "Workflow": "LinkedIn AI Automation",
-            "Status": "Failed",
-            "Error": "={{ $json.error_message }}"
-          }
-        },
-        "options": {}
-      },
-      "id": "append_error_logs",
-      "name": "Google Sheets (Append Error Log)",
-      "type": "n8n-nodes-base.googleSheets",
-      "typeVersion": 4,
-      "position": [ 600, 700 ],
-      "credentials": { "googleSheetsOAuth2Api": { "id": "", "name": "Google Sheets account" } }
+      "id": "supabase_insert_log",
+      "name": "Supabase (Log Success)",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [ 1900, 300 ],
+      "credentials": { "supabaseApi": { "id": "", "name": "Supabase account" } }
     }
   ],
   "connections": {
-    "Schedule Trigger": {
-      "main": [ [ { "node": "Google Sheets (Read Rows)", "type": "main", "index": 0 } ] ]
-    },
-    "Google Sheets (Read Rows)": {
-      "main": [ [ { "node": "Date & Time (Parse)", "type": "main", "index": 0 } ] ]
-    },
-    "Date & Time (Parse)": {
-      "main": [ [ { "node": "IF (Not Posted, Today, & Matching Hour)", "type": "main", "index": 0 } ] ]
-    },
-    "IF (Not Posted, Today, & Matching Hour)": {
-      "main": [ [ { "node": "Update Status (Posting)", "type": "main", "index": 0 } ] ]
-    },
-    "Update Status (Posting)": {
-      "main": [ [ { "node": "Code (Preserve Row Context)", "type": "main", "index": 0 } ] ]
-    },
-    "Code (Preserve Row Context)": {
-      "main": [ [ { "node": "Gemini (Rewrite)", "type": "main", "index": 0 } ] ]
-    },
-    "Gemini (Rewrite)": {
-      "main": [ [ { "node": "IF (Gemini Success)", "type": "main", "index": 0 } ] ]
-    },
-    "IF (Gemini Success)": {
-      "main": [ [ { "node": "IF Image Exists", "type": "main", "index": 0 } ] ]
-    },
-    "IF Image Exists": {
-      "main": [
-        [ { "node": "Validate Image URL", "type": "main", "index": 0 } ],
-        [ { "node": "Buffer (Text Only)", "type": "main", "index": 0 } ]
-      ]
-    },
-    "Validate Image URL": {
-      "main": [ [ { "node": "IF Image Valid (200)", "type": "main", "index": 0 } ] ]
-    },
-    "IF Image Valid (200)": {
-      "main": [
-        [ { "node": "Buffer (Image)", "type": "main", "index": 0 } ],
-        [ { "node": "Buffer (Text Only)", "type": "main", "index": 0 } ]
-      ]
-    },
-    "Buffer (Image)": {
-      "main": [ [ { "node": "IF Buffer Success", "type": "main", "index": 0 } ] ]
-    },
-    "Buffer (Text Only)": {
-      "main": [ [ { "node": "IF Buffer Success", "type": "main", "index": 0 } ] ]
-    },
-    "IF Buffer Success": {
-      "main": [ [ { "node": "Google Sheets Update (Final)", "type": "main", "index": 0 } ] ]
-    },
-    "Google Sheets Update (Final)": {
-      "main": [ [ { "node": "Google Sheets (Append Log)", "type": "main", "index": 0 } ] ]
-    },
-    "Error Trigger": {
-      "main": [ [ { "node": "Code (Extract Error Context)", "type": "main", "index": 0 } ] ]
-    },
-    "Code (Extract Error Context)": {
-      "main": [ [ { "node": "Google Sheets (Log Error to Calendar)", "type": "main", "index": 0 } ] ]
-    },
-    "Google Sheets (Log Error to Calendar)": {
-      "main": [ [ { "node": "Google Sheets (Append Error Log)", "type": "main", "index": 0 } ] ]
-    }
+    "Schedule Trigger": { "main": [ [ { "node": "Supabase (Read Pending)", "type": "main", "index": 0 } ] ] },
+    "Supabase (Read Pending)": { "main": [ [ { "node": "IF (Today & Matching Hour)", "type": "main", "index": 0 } ] ] },
+    "IF (Today & Matching Hour)": { "main": [ [ { "node": "Supabase (Set Posting)", "type": "main", "index": 0 } ] ] },
+    "Supabase (Set Posting)": { "main": [ 
+      [ { "node": "Gemini 2.5 (Variant A)", "type": "main", "index": 0 } ],
+      [ { "node": "OpenRouter Llama 3 (Variant B)", "type": "main", "index": 0 } ],
+      [ { "node": "Ollama Mistral (Variant C)", "type": "main", "index": 0 } ]
+    ] },
+    "Gemini 2.5 (Variant A)": { "main": [ [ { "node": "Merge AI Variants", "type": "main", "index": 0 } ] ] },
+    "OpenRouter Llama 3 (Variant B)": { "main": [ [ { "node": "Merge AI Variants", "type": "main", "index": 0 } ] ] },
+    "Ollama Mistral (Variant C)": { "main": [ [ { "node": "Merge AI Variants", "type": "main", "index": 0 } ] ] },
+    "Merge AI Variants": { "main": [ [ { "node": "Gemini (The Judge)", "type": "main", "index": 0 } ] ] },
+    "Gemini (The Judge)": { "main": [ [ { "node": "Buffer (Post)", "type": "main", "index": 0 } ] ] },
+    "Buffer (Post)": { "main": [ [ { "node": "Supabase (Update Success)", "type": "main", "index": 0 } ] ] },
+    "Supabase (Update Success)": { "main": [ [ { "node": "Supabase (Log Success)", "type": "main", "index": 0 } ] ] }
   }
 }
