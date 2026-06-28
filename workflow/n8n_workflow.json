@@ -20,19 +20,22 @@
       "parameters": {
         "operation": "read",
         "documentId": { "__rl": true, "value": "={{ $env.GOOGLE_SHEET_ID }}", "mode": "id" },
-        "sheetName": { "__rl": true, "value": "Calendar", "mode": "name" }
+        "sheetName": { "__rl": true, "value": "Calendar", "mode": "name" },
+        "options": {}
       },
       "id": "read_rows",
       "name": "Google Sheets (Read Rows)",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4,
-      "position": [ 300, 300 ]
+      "position": [ 300, 300 ],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "", "name": "Google Sheets account" } }
     },
     {
       "parameters": {
         "action": "format",
         "value": "={{ $json.Date }}",
-        "toFormat": "YYYY-MM-DD"
+        "toFormat": "YYYY-MM-DD",
+        "options": {}
       },
       "id": "date_time",
       "name": "Date & Time (Parse)",
@@ -62,90 +65,114 @@
         "documentId": { "__rl": true, "value": "={{ $env.GOOGLE_SHEET_ID }}", "mode": "id" },
         "sheetName": { "__rl": true, "value": "Calendar", "mode": "name" },
         "rowNumber": "={{ $json.row_number }}",
-        "columns": { "mappingMode": "defineBelow", "value": { "Status": "Posting" } }
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": { "Status": "Posting" }
+        },
+        "options": {}
       },
       "id": "status_posting",
       "name": "Update Status (Posting)",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4,
-      "position": [ 900, 300 ]
+      "position": [ 900, 300 ],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "", "name": "Google Sheets account" } }
     },
     {
       "parameters": {
-        "jsCode": "return items.map(item => ({\n  ...item,\n  json: {\n    ...item.json,\n    _execution_context: {\n      row_number: item.json.row_number,\n      post_date: item.json.Date,\n      post_time: item.json.Time\n    }\n  }\n}));"
+        "jsCode": "return {\n  ...items,\n  _execution_context: {\n    row_number: $json.row_number,\n    post_date: $json.Date,\n    post_time: $json.Time\n  }\n}"
       },
-      "id": "preserve_context",
+      "id": "preserve_row_context",
       "name": "Code (Preserve Row Context)",
       "type": "n8n-nodes-base.code",
-      "typeVersion": 1,
-      "position": [ 1100, 300 ]
+      "typeVersion": 2,
+      "position": [ 1000, 300 ]
     },
     {
       "parameters": {
-        "prompt": "=You are writing for my personal LinkedIn profile.\nPost:\n{{ $json.Post }}",
-        "model": "={{ $env.GEMINI_MODEL }}"
+        "prompt": "=You are writing for my personal LinkedIn profile.\n\nAudience:\nSoftware Engineers\nFounders\nRecruiters\nManufacturing Leaders\n\nWriting style:\nProfessional\nSimple English\nOne hook\nShort paragraphs\nMaximum 5 hashtags\nNo markdown\nNo quotation marks\nReturn only the final LinkedIn post.\n\nPost:\n{{ $json.Post }}",
+        "model": "={{ $env.GEMINI_MODEL }}",
+        "options": {}
       },
       "id": "gemini",
       "name": "Gemini (Rewrite)",
       "type": "n8n-nodes-base.googleGemini",
       "typeVersion": 1,
-      "position": [ 1300, 300 ],
+      "position": [ 1150, 300 ],
+      "credentials": { "googleGeminiApi": { "id": "", "name": "Google Gemini account" } },
       "onError": "continueErrorOutput"
     },
     {
       "parameters": {
-        "conditions": { "boolean": [ { "value1": "={{ $json.error ? false : true }}", "value2": true } ] }
+        "conditions": {
+          "string": [
+            { "value1": "={{ $json.errorMessage }}", "operation": "isEmpty" }
+          ]
+        }
       },
-      "id": "if_gemini_success",
+      "id": "check_gemini_error",
       "name": "IF (Gemini Success)",
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
-      "position": [ 1500, 300 ]
+      "position": [ 1300, 300 ]
     },
     {
       "parameters": {
-        "conditions": { "string": [ { "value1": "={{ $('IF (Not Posted, Today, & Matching Hour)').item.json.Image }}", "operation": "isNotEmpty" } ] }
+        "conditions": {
+          "string": [
+            { "value1": "={{ $json._execution_context.image_url }}", "operation": "isNotEmpty" }
+          ]
+        }
       },
       "id": "check_image",
       "name": "IF Image Exists",
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
-      "position": [ 1700, 200 ]
+      "position": [ 1450, 300 ]
     },
     {
       "parameters": {
         "method": "HEAD",
-        "url": "={{ $('IF (Not Posted, Today, & Matching Hour)').item.json.Image }}"
+        "url": "={{ $json._execution_context.image_url }}",
+        "options": {}
       },
       "id": "validate_image",
       "name": "Validate Image URL",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
-      "position": [ 1900, 100 ],
+      "position": [ 1600, 200 ],
       "onError": "continueErrorOutput"
     },
     {
       "parameters": {
-        "conditions": { "number": [ { "value1": "={{ $response.statusCode }}", "value2": 200 } ] }
+        "conditions": {
+          "string": [
+            { "value1": "={{ $json.statusCode }}", "value2": "200", "operation": "equal" }
+          ]
+        }
       },
-      "id": "if_image_valid",
+      "id": "check_image_valid",
       "name": "IF Image Valid (200)",
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
-      "position": [ 2100, 100 ]
+      "position": [ 1750, 200 ]
     },
     {
       "parameters": {
-        "text": "={{ $json.text }}",
+        "text": "={{ $('Gemini (Rewrite)').item.json.text }}",
         "profile": "={{ $env.BUFFER_PROFILE_ID }}",
         "now": true,
-        "media": [ "={{ $('IF (Not Posted, Today, & Matching Hour)').item.json.Image }}" ]
+        "media": [ "={{ $json._execution_context.image_url }}" ]
       },
       "id": "buffer_image",
       "name": "Buffer (Image)",
       "type": "n8n-nodes-base.buffer",
       "typeVersion": 1,
-      "position": [ 2300, 50 ],
+      "position": [ 1900, 200 ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 30000,
+      "credentials": { "bufferApi": { "id": "", "name": "Buffer account" } },
       "onError": "continueErrorOutput"
     },
     {
@@ -155,28 +182,36 @@
         "now": true
       },
       "id": "buffer_text",
-      "name": "Buffer (Text)",
+      "name": "Buffer (Text Only)",
       "type": "n8n-nodes-base.buffer",
       "typeVersion": 1,
-      "position": [ 2300, 350 ],
+      "position": [ 1900, 400 ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 30000,
+      "credentials": { "bufferApi": { "id": "", "name": "Buffer account" } },
       "onError": "continueErrorOutput"
     },
     {
       "parameters": {
-        "conditions": { "boolean": [ { "value1": "={{ $json.error ? false : true }}", "value2": true } ] }
+        "conditions": {
+          "string": [
+            { "value1": "={{ $json.errorMessage }}", "operation": "isEmpty" }
+          ]
+        }
       },
-      "id": "if_buffer_success",
+      "id": "check_buffer_success",
       "name": "IF Buffer Success",
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
-      "position": [ 2500, 200 ]
+      "position": [ 2050, 300 ]
     },
     {
       "parameters": {
         "operation": "update",
         "documentId": { "__rl": true, "value": "={{ $env.GOOGLE_SHEET_ID }}", "mode": "id" },
         "sheetName": { "__rl": true, "value": "Calendar", "mode": "name" },
-        "rowNumber": "={{ $('Code (Preserve Row Context)').item.json._execution_context.row_number }}",
+        "rowNumber": "={{ $json._execution_context.row_number }}",
         "columns": {
           "mappingMode": "defineBelow",
           "value": {
@@ -186,13 +221,15 @@
             "LinkedIn URL": "={{ $json.share_url }}",
             "AI Version": "={{ $env.GEMINI_MODEL }}"
           }
-        }
+        },
+        "options": {}
       },
       "id": "update_sheet_final",
       "name": "Google Sheets Update (Final)",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4,
-      "position": [ 2700, 200 ]
+      "position": [ 2200, 300 ],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "", "name": "Google Sheets account" } }
     },
     {
       "parameters": {
@@ -207,13 +244,15 @@
             "Status": "Success",
             "LinkedIn URL": "={{ $json.share_url }}"
           }
-        }
+        },
+        "options": {}
       },
       "id": "append_logs",
       "name": "Google Sheets (Append Log)",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4,
-      "position": [ 2900, 200 ]
+      "position": [ 2350, 300 ],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "", "name": "Google Sheets account" } }
     },
     {
       "parameters": {},
@@ -221,17 +260,17 @@
       "name": "Error Trigger",
       "type": "n8n-nodes-base.errorTrigger",
       "typeVersion": 1,
-      "position": [ 100, 600 ]
+      "position": [ 100, 700 ]
     },
     {
       "parameters": {
-        "jsCode": "const errorMsg = items[0].json.error?.message || 'Unknown error';\nconst rowNum = items[0].json._execution_context?.row_number || items[0].json.row_number || 2;\nreturn [{\n  json: {\n    row_number: rowNum,\n    error_message: errorMsg\n  }\n}];"
+        "jsCode": "const errorMsg = items[0].json.error?.message || 'Unknown error';\nconst rowNum = items[0].json._execution_context?.row_number || items[0].json.row_number || 2;\nreturn [{\n  row_number: rowNum,\n  error_message: errorMsg\n}]"
       },
       "id": "extract_error_context",
       "name": "Code (Extract Error Context)",
       "type": "n8n-nodes-base.code",
-      "typeVersion": 1,
-      "position": [ 300, 600 ]
+      "typeVersion": 2,
+      "position": [ 300, 700 ]
     },
     {
       "parameters": {
@@ -241,14 +280,19 @@
         "rowNumber": "={{ $json.row_number }}",
         "columns": {
           "mappingMode": "defineBelow",
-          "value": { "Status": "Failed", "Error": "={{ $json.error_message }}" }
-        }
+          "value": {
+            "Status": "Failed",
+            "Error": "={{ $json.error_message }}"
+          }
+        },
+        "options": {}
       },
       "id": "update_error_calendar",
       "name": "Google Sheets (Log Error to Calendar)",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4,
-      "position": [ 500, 600 ]
+      "position": [ 450, 700 ],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "", "name": "Google Sheets account" } }
     },
     {
       "parameters": {
@@ -263,33 +307,77 @@
             "Status": "Failed",
             "Error": "={{ $json.error_message }}"
           }
-        }
+        },
+        "options": {}
       },
       "id": "append_error_logs",
       "name": "Google Sheets (Append Error Log)",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4,
-      "position": [ 700, 600 ]
+      "position": [ 600, 700 ],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "", "name": "Google Sheets account" } }
     }
   ],
   "connections": {
-    "Schedule Trigger": { "main": [ [ { "node": "Google Sheets (Read Rows)", "type": "main", "index": 0 } ] ] },
-    "Google Sheets (Read Rows)": { "main": [ [ { "node": "Date & Time (Parse)", "type": "main", "index": 0 } ] ] },
-    "Date & Time (Parse)": { "main": [ [ { "node": "IF (Not Posted, Today, & Matching Hour)", "type": "main", "index": 0 } ] ] },
-    "IF (Not Posted, Today, & Matching Hour)": { "main": [ [ { "node": "Update Status (Posting)", "type": "main", "index": 0 } ] ] },
-    "Update Status (Posting)": { "main": [ [ { "node": "Code (Preserve Row Context)", "type": "main", "index": 0 } ] ] },
-    "Code (Preserve Row Context)": { "main": [ [ { "node": "Gemini (Rewrite)", "type": "main", "index": 0 } ] ] },
-    "Gemini (Rewrite)": { "main": [ [ { "node": "IF (Gemini Success)", "type": "main", "index": 0 } ] ] },
-    "IF (Gemini Success)": { "main": [ [ { "node": "IF Image Exists", "type": "main", "index": 0 } ], [ { "node": "Code (Extract Error Context)", "type": "main", "index": 0 } ] ] },
-    "IF Image Exists": { "main": [ [ { "node": "Validate Image URL", "type": "main", "index": 0 } ], [ { "node": "Buffer (Text)", "type": "main", "index": 0 } ] ] },
-    "Validate Image URL": { "main": [ [ { "node": "IF Image Valid (200)", "type": "main", "index": 0 } ] ] },
-    "IF Image Valid (200)": { "main": [ [ { "node": "Buffer (Image)", "type": "main", "index": 0 } ], [ { "node": "Buffer (Text)", "type": "main", "index": 0 } ] ] },
-    "Buffer (Image)": { "main": [ [ { "node": "IF Buffer Success", "type": "main", "index": 0 } ] ] },
-    "Buffer (Text)": { "main": [ [ { "node": "IF Buffer Success", "type": "main", "index": 0 } ] ] },
-    "IF Buffer Success": { "main": [ [ { "node": "Google Sheets Update (Final)", "type": "main", "index": 0 } ], [ { "node": "Code (Extract Error Context)", "type": "main", "index": 0 } ] ] },
-    "Google Sheets Update (Final)": { "main": [ [ { "node": "Google Sheets (Append Log)", "type": "main", "index": 0 } ] ] },
-    "Error Trigger": { "main": [ [ { "node": "Code (Extract Error Context)", "type": "main", "index": 0 } ] ] },
-    "Code (Extract Error Context)": { "main": [ [ { "node": "Google Sheets (Log Error to Calendar)", "type": "main", "index": 0 } ] ] },
-    "Google Sheets (Log Error to Calendar)": { "main": [ [ { "node": "Google Sheets (Append Error Log)", "type": "main", "index": 0 } ] ] }
+    "Schedule Trigger": {
+      "main": [ [ { "node": "Google Sheets (Read Rows)", "type": "main", "index": 0 } ] ]
+    },
+    "Google Sheets (Read Rows)": {
+      "main": [ [ { "node": "Date & Time (Parse)", "type": "main", "index": 0 } ] ]
+    },
+    "Date & Time (Parse)": {
+      "main": [ [ { "node": "IF (Not Posted, Today, & Matching Hour)", "type": "main", "index": 0 } ] ]
+    },
+    "IF (Not Posted, Today, & Matching Hour)": {
+      "main": [ [ { "node": "Update Status (Posting)", "type": "main", "index": 0 } ] ]
+    },
+    "Update Status (Posting)": {
+      "main": [ [ { "node": "Code (Preserve Row Context)", "type": "main", "index": 0 } ] ]
+    },
+    "Code (Preserve Row Context)": {
+      "main": [ [ { "node": "Gemini (Rewrite)", "type": "main", "index": 0 } ] ]
+    },
+    "Gemini (Rewrite)": {
+      "main": [ [ { "node": "IF (Gemini Success)", "type": "main", "index": 0 } ] ]
+    },
+    "IF (Gemini Success)": {
+      "main": [ [ { "node": "IF Image Exists", "type": "main", "index": 0 } ] ]
+    },
+    "IF Image Exists": {
+      "main": [
+        [ { "node": "Validate Image URL", "type": "main", "index": 0 } ],
+        [ { "node": "Buffer (Text Only)", "type": "main", "index": 0 } ]
+      ]
+    },
+    "Validate Image URL": {
+      "main": [ [ { "node": "IF Image Valid (200)", "type": "main", "index": 0 } ] ]
+    },
+    "IF Image Valid (200)": {
+      "main": [
+        [ { "node": "Buffer (Image)", "type": "main", "index": 0 } ],
+        [ { "node": "Buffer (Text Only)", "type": "main", "index": 0 } ]
+      ]
+    },
+    "Buffer (Image)": {
+      "main": [ [ { "node": "IF Buffer Success", "type": "main", "index": 0 } ] ]
+    },
+    "Buffer (Text Only)": {
+      "main": [ [ { "node": "IF Buffer Success", "type": "main", "index": 0 } ] ]
+    },
+    "IF Buffer Success": {
+      "main": [ [ { "node": "Google Sheets Update (Final)", "type": "main", "index": 0 } ] ]
+    },
+    "Google Sheets Update (Final)": {
+      "main": [ [ { "node": "Google Sheets (Append Log)", "type": "main", "index": 0 } ] ]
+    },
+    "Error Trigger": {
+      "main": [ [ { "node": "Code (Extract Error Context)", "type": "main", "index": 0 } ] ]
+    },
+    "Code (Extract Error Context)": {
+      "main": [ [ { "node": "Google Sheets (Log Error to Calendar)", "type": "main", "index": 0 } ] ]
+    },
+    "Google Sheets (Log Error to Calendar)": {
+      "main": [ [ { "node": "Google Sheets (Append Error Log)", "type": "main", "index": 0 } ] ]
+    }
   }
 }
