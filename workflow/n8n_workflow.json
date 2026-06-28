@@ -1,0 +1,299 @@
+{
+  "name": "LinkedIn AI Content Automation Platform",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            { "field": "cronExpression", "expression": "0 20 8 * * *" },
+            { "field": "cronExpression", "expression": "0 50 18 * * *" }
+          ]
+        }
+      },
+      "id": "trigger_schedule",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [ 100, 300 ]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "value": "={{ $env.GOOGLE_SHEET_ID }}", "mode": "id" },
+        "sheetName": { "__rl": true, "value": "Calendar", "mode": "name" },
+        "options": {}
+      },
+      "id": "read_rows",
+      "name": "Google Sheets (Read Rows)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [ 300, 300 ],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "", "name": "Google Sheets account" } }
+    },
+    {
+      "parameters": {
+        "action": "format",
+        "value": "={{ $json.Date }}",
+        "toFormat": "YYYY-MM-DD",
+        "options": {}
+      },
+      "id": "date_time",
+      "name": "Date & Time (Parse)",
+      "type": "n8n-nodes-base.dateTime",
+      "typeVersion": 2,
+      "position": [ 500, 300 ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            { "value1": "={{ $json.Status }}", "value2": "Not Posted" },
+            { "value1": "={{ $json.formattedDate }}", "value2": "={{ $now.format('YYYY-MM-DD') }}" },
+            { "value1": "={{ $json.Time.split(':')[0] }}", "value2": "={{ $now.format('HH') }}" }
+          ]
+        }
+      },
+      "id": "if_today",
+      "name": "IF (Not Posted, Today, & Matching Hour)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [ 700, 300 ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": { "__rl": true, "value": "={{ $env.GOOGLE_SHEET_ID }}", "mode": "id" },
+        "sheetName": { "__rl": true, "value": "Calendar", "mode": "name" },
+        "rowNumber": "={{ $json.row_number }}",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": { "Status": "Posting" }
+        },
+        "options": {}
+      },
+      "id": "status_posting",
+      "name": "Update Status (Posting)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [ 900, 300 ],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "", "name": "Google Sheets account" } }
+    },
+    {
+      "parameters": {
+        "prompt": "=You are writing for my personal LinkedIn profile.\n\nAudience:\nSoftware Engineers\nFounders\nRecruiters\nManufacturing Leaders\n\nWriting style:\nProfessional\nSimple English\nOne hook\nShort paragraphs\nMaximum 5 hashtags\nNo markdown\nNo quotation marks\nReturn only the final LinkedIn post.\n\nPost:\n{{ $json.Post }}",
+        "model": "={{ $env.GEMINI_MODEL }}",
+        "options": {}
+      },
+      "id": "gemini",
+      "name": "Gemini (Rewrite)",
+      "type": "n8n-nodes-base.googleGemini",
+      "typeVersion": 1,
+      "position": [ 1100, 300 ],
+      "credentials": { "googleGeminiApi": { "id": "", "name": "Google Gemini account" } }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            { "value1": "={{ $('IF (Not Posted, Today, & Matching Hour)').item.json.Image }}", "operation": "isNotEmpty" }
+          ]
+        }
+      },
+      "id": "check_image",
+      "name": "IF Image Exists",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [ 1300, 300 ]
+    },
+    {
+      "parameters": {
+        "method": "HEAD",
+        "url": "={{ $('IF (Not Posted, Today, & Matching Hour)').item.json.Image }}",
+        "options": {}
+      },
+      "id": "validate_image",
+      "name": "Validate Image URL",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [ 1500, 200 ]
+    },
+    {
+      "parameters": {
+        "text": "={{ $json.text }}",
+        "profile": "={{ $env.BUFFER_PROFILE_ID }}",
+        "now": true,
+        "media": [ "={{ $('IF (Not Posted, Today, & Matching Hour)').item.json.Image }}" ]
+      },
+      "id": "buffer_image",
+      "name": "Buffer (Image)",
+      "type": "n8n-nodes-base.buffer",
+      "typeVersion": 1,
+      "position": [ 1700, 200 ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 30000,
+      "credentials": { "bufferApi": { "id": "", "name": "Buffer account" } }
+    },
+    {
+      "parameters": {
+        "text": "={{ $('Gemini (Rewrite)').item.json.text }}",
+        "profile": "={{ $env.BUFFER_PROFILE_ID }}",
+        "now": true
+      },
+      "id": "buffer_text",
+      "name": "Buffer (Text)",
+      "type": "n8n-nodes-base.buffer",
+      "typeVersion": 1,
+      "position": [ 1700, 400 ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 30000,
+      "credentials": { "bufferApi": { "id": "", "name": "Buffer account" } }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": { "__rl": true, "value": "={{ $env.GOOGLE_SHEET_ID }}", "mode": "id" },
+        "sheetName": { "__rl": true, "value": "Calendar", "mode": "name" },
+        "rowNumber": "={{ $('IF (Not Posted, Today, & Matching Hour)').item.json.row_number }}",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Status": "Posted",
+            "Posted At": "={{ $now }}",
+            "Buffer ID": "={{ $json.id }}",
+            "LinkedIn URL": "={{ $json.share_url }}",
+            "AI Version": "={{ $env.GEMINI_MODEL }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "update_sheet_final",
+      "name": "Google Sheets Update (Final)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [ 1900, 300 ],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "", "name": "Google Sheets account" } }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "value": "={{ $env.GOOGLE_SHEET_ID }}", "mode": "id" },
+        "sheetName": { "__rl": true, "value": "Logs", "mode": "name" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Date": "={{ $now }}",
+            "Workflow": "LinkedIn AI Automation",
+            "Status": "Success",
+            "LinkedIn URL": "={{ $('Buffer (Image)').item.json.share_url || $('Buffer (Text)').item.json.share_url }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "append_logs",
+      "name": "Google Sheets (Append Log)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [ 2100, 300 ],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "", "name": "Google Sheets account" } }
+    },
+    {
+      "parameters": {},
+      "id": "error_trigger",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [ 100, 600 ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": { "__rl": true, "value": "={{ $env.GOOGLE_SHEET_ID }}", "mode": "id" },
+        "sheetName": { "__rl": true, "value": "Calendar", "mode": "name" },
+        "rowNumber": "={{ $json.execution.customData.row_number || 2 }}",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Status": "Failed",
+            "Error": "={{ $json.error.message }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "update_error_calendar",
+      "name": "Google Sheets (Log Error to Calendar)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [ 300, 600 ],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "", "name": "Google Sheets account" } }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "value": "={{ $env.GOOGLE_SHEET_ID }}", "mode": "id" },
+        "sheetName": { "__rl": true, "value": "Logs", "mode": "name" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Date": "={{ $now }}",
+            "Workflow": "LinkedIn AI Automation",
+            "Status": "Failed",
+            "Error": "={{ $json.error.message }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "append_error_logs",
+      "name": "Google Sheets (Append Error Log)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [ 500, 600 ],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "", "name": "Google Sheets account" } }
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [ [ { "node": "Google Sheets (Read Rows)", "type": "main", "index": 0 } ] ]
+    },
+    "Google Sheets (Read Rows)": {
+      "main": [ [ { "node": "Date & Time (Parse)", "type": "main", "index": 0 } ] ]
+    },
+    "Date & Time (Parse)": {
+      "main": [ [ { "node": "IF (Not Posted, Today, & Matching Hour)", "type": "main", "index": 0 } ] ]
+    },
+    "IF (Not Posted, Today, & Matching Hour)": {
+      "main": [ [ { "node": "Update Status (Posting)", "type": "main", "index": 0 } ] ]
+    },
+    "Update Status (Posting)": {
+      "main": [ [ { "node": "Gemini (Rewrite)", "type": "main", "index": 0 } ] ]
+    },
+    "Gemini (Rewrite)": {
+      "main": [ [ { "node": "IF Image Exists", "type": "main", "index": 0 } ] ]
+    },
+    "IF Image Exists": {
+      "main": [
+        [ { "node": "Validate Image URL", "type": "main", "index": 0 } ],
+        [ { "node": "Buffer (Text)", "type": "main", "index": 0 } ]
+      ]
+    },
+    "Validate Image URL": {
+      "main": [ [ { "node": "Buffer (Image)", "type": "main", "index": 0 } ] ]
+    },
+    "Buffer (Image)": {
+      "main": [ [ { "node": "Google Sheets Update (Final)", "type": "main", "index": 0 } ] ]
+    },
+    "Buffer (Text)": {
+      "main": [ [ { "node": "Google Sheets Update (Final)", "type": "main", "index": 0 } ] ]
+    },
+    "Google Sheets Update (Final)": {
+      "main": [ [ { "node": "Google Sheets (Append Log)", "type": "main", "index": 0 } ] ]
+    },
+    "Error Trigger": {
+      "main": [ [ { "node": "Google Sheets (Log Error to Calendar)", "type": "main", "index": 0 } ] ]
+    },
+    "Google Sheets (Log Error to Calendar)": {
+      "main": [ [ { "node": "Google Sheets (Append Error Log)", "type": "main", "index": 0 } ] ]
+    }
+  }
+}

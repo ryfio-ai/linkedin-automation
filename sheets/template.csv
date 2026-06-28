@@ -1,0 +1,3 @@
+Date,Time,Post,Image,Status,Posted At,Buffer ID,LinkedIn URL,AI Version,Error,Retry
+2023-11-01,08:20,This is a test post about automation.,,Not Posted,,,,,,
+2023-11-02,08:20,"Another post, this time with an image.",https://example.com/image.jpg,Not Posted,,,,,,
