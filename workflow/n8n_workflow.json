@@ -1,5 +1,5 @@
 {
-  "name": "LinkedIn Multi-AI Automation with Supabase",
+  "name": "LinkedIn Multi-AI Automation with Supabase (Fixed)",
   "nodes": [
     {
       "parameters": {
@@ -66,7 +66,8 @@
     {
       "parameters": {
         "prompt": "=Write a professional LinkedIn post.\nDraft:\n{{ $json.draft_post }}",
-        "model": "={{ $env.GEMINI_MODEL }}"
+        "model": "={{ $env.GEMINI_MODEL }}",
+        "options": {}
       },
       "id": "gemini_generate",
       "name": "Gemini 2.5 (Variant A)",
@@ -126,14 +127,16 @@
     {
       "parameters": {
         "prompt": "=You are an expert LinkedIn judge. Review these three variants and return ONLY the text of the best one.\n\nVariant A (Gemini): {{ $('Gemini 2.5 (Variant A)').item.json.text || 'FAILED' }}\n\nVariant B (OpenRouter): {{ $('OpenRouter Llama 3 (Variant B)').item.json.choices[0].message.content || 'FAILED' }}\n\nVariant C (Ollama): {{ $('Ollama Mistral (Variant C)').item.json.response || 'FAILED' }}",
-        "model": "={{ $env.GEMINI_MODEL }}"
+        "model": "={{ $env.GEMINI_MODEL }}",
+        "options": {}
       },
       "id": "gemini_judge",
       "name": "Gemini (The Judge)",
       "type": "n8n-nodes-base.googleGemini",
       "typeVersion": 1,
       "position": [ 1300, 300 ],
-      "credentials": { "googleGeminiApi": { "id": "", "name": "Google Gemini account" } }
+      "credentials": { "googleGeminiApi": { "id": "", "name": "Google Gemini account" } },
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -147,7 +150,11 @@
       "type": "n8n-nodes-base.buffer",
       "typeVersion": 1,
       "position": [ 1500, 300 ],
-      "credentials": { "bufferApi": { "id": "", "name": "Buffer account" } }
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 30000,
+      "credentials": { "bufferApi": { "id": "", "name": "Buffer account" } },
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
